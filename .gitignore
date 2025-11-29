@@ -1,0 +1,113 @@
+# ---------------------------
+# Python
+# ---------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.pickle
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Byte-compiled / optimized files
+*.pyc
+*.pyo
+*.pyd
+
+# PyInstaller
+*.spec
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.log
+*.pytest_cache/
+.cache/
+
+
+# ---------------------------
+# Jupyter Notebook
+# ---------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Jupyter runtime files
+.jupyter/
+.local/share/jupyter/
+runtime/
+
+# ---------------------------
+# Logs & temp files
+# ---------------------------
+*.log
+*.tmp
+*.temp
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------------------------
+# VSCode
+# ---------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ---------------------------
+# PyCharm
+# ---------------------------
+.idea/
+*.iml
+
+
+# ---------------------------
+# Conda
+# ---------------------------
+conda-meta/
+*.conda
+*.yaml
+
+
+# ---------------------------
+# Others
+# ---------------------------
+# Ignore environment variables
+.env*
+.envrc
+
+# Ignore secret tokens or configs
+config.yaml
+secrets.yaml
+*.key
+*.pem
+
