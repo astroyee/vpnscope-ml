@@ -40,7 +40,7 @@ def analyze_pcap_file(file_obj):
             return (_render_status("Error", error, "#ef4444"), *empty_outputs[1:])
 
         # 3. Calculate Suspicion Score (Business Logic)
-        suspicion_score = calculate_suspicion_score(df_meta, vpn_probs)
+        suspicion_score = calculate_suspicion_score(df_meta, vpn_probs, inference_service.threshold)
         
         # 4. Determine Banner display
         vpn_count = np.sum(predictions)
@@ -79,7 +79,7 @@ def analyze_pcap_file(file_obj):
         df_ip_counts = results_df['Source IP'].value_counts().head(10).reset_index()
         df_ip_counts.columns = ["Source IP", "Flow Count"]
 
-        display_table = results_df.sort_values(by="VPN Prob", ascending=False)
+        display_table = results_df.sort_values(by="Length", ascending=False)
         display_table = display_table[["Source IP", "Dest IP", "Protocol", "Length", "Type", "VPN Prob"]]
 
         return (
