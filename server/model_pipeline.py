@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import shap
 from scipy.io import arff
 
 # Scikit-learn
@@ -154,6 +155,65 @@ def find_best_threshold_cv(estimator, X, y, cv=5):
 # ==========================================
 # 3. Visualization Functions
 # ==========================================
+def generate_shap_report(pipeline, X_test, feature_names, output_dir):
+    """
+    Generates SHAP interpretability report for the XGBoost base model.
+    """
+    print("[INFO] Generating SHAP report...")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    try:
+        # 1. Prepare data: Apply preprocessing (cleaning + selection + quantile transform)
+        # pipeline[:-1] retrieves all steps except the final classifier
+        preprocessor = pipeline[:-1]
+        X_test_transformed = preprocessor.transform(X_test)
+        
+        # 2. Extract base model: Get fitted XGBoost from StackingClassifier
+        stacking_clf = pipeline.named_steps['stacking']
+        base_model = None
+        
+        for model in stacking_clf.estimators_:
+            if isinstance(model, xgb.XGBClassifier):
+                base_model = model
+                break
+        
+        if base_model is None:
+            base_model = stacking_clf.estimators_[0]
+            print(f"[WARN] XGBoost not found in stack, using {type(base_model).__name__} for SHAP.")
+
+        # 3. Compute SHAP values
+        # Sample 500 instances for speed
+        sample_size = min(500, len(X_test_transformed))
+        indices = np.random.choice(len(X_test_transformed), sample_size, replace=False)
+        X_sample = X_test_transformed[indices]
+        
+        # Use TreeExplainer (optimized for tree-based models)
+        explainer = shap.TreeExplainer(base_model)
+        shap_values = explainer.shap_values(X_sample)
+
+        # 4. Plot and save Summary Plot
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_sample, feature_names=feature_names, show=False)
+        plt.title(f'SHAP Summary ({type(base_model).__name__})')
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/shap_summary.png")
+        plt.close()
+
+        # 5. Plot and save Bar Plot (Feature Importance)
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values, X_sample, feature_names=feature_names, plot_type="bar", show=False)
+        plt.title('Feature Importance (SHAP)')
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/shap_importance_bar.png")
+        plt.close()
+
+        print(f"[INFO] SHAP reports saved to {output_dir}/")
+
+    except Exception as e:
+        print(f"[WARN] Failed to generate SHAP report: {e}")
+        import traceback
+        traceback.print_exc()
 
 def generate_evaluation_plots(y_true, y_probs, y_pred, pipeline, output_dir):
     """Generates and saves standard evaluation plots."""
@@ -387,6 +447,9 @@ def run_pipeline():
     plot_dir = 'evaluation_results'
     generate_evaluation_plots(y_test, probs_test, final_preds, full_pipeline, plot_dir)
     print(f"[INFO] Plots saved to {plot_dir}/")
+
+    final_feature_names = list(X_train_sel.columns)
+    generate_shap_report(full_pipeline, X_test, final_feature_names, plot_dir)
 
     # 5. Threshold Stability Check
     p, r, t = precision_recall_curve(y_test, probs_test)
