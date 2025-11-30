@@ -1,4 +1,4 @@
-# fileName: data_analysis.py
+# fileName: ml/analysis/data_report.py
 import os
 import sys
 import io
@@ -201,10 +201,18 @@ def analyze_correlations(df):
     # Correlation Matrix
     corr_matrix = X_clean.corr().abs()
 
-    # --- Plot: Heatmap ---
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(corr_matrix, cmap='coolwarm', xticklabels=False, yticklabels=False)
+    # --- Plot: Heatmap (FIXED: Showing Feature Names) ---
+    plt.figure(figsize=(14, 12)) # Increased size slightly for labels
+    sns.heatmap(
+        corr_matrix, 
+        cmap='coolwarm', 
+        xticklabels=True, # Display X labels
+        yticklabels=True  # Display Y labels
+    )
+    plt.xticks(rotation=45, ha='right') # Rotate x-labels to prevent overlap
+    plt.yticks(rotation=0)
     plt.title("Feature Correlation Matrix Heatmap")
+    plt.tight_layout() # Adjust layout to ensure labels are not cut off
     
     save_path = os.path.join(OUTPUT_DIR, 'correlation_heatmap.png')
     plt.savefig(save_path)
