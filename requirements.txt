@@ -9,3 +9,4 @@ gradio>=3.0.0
 scapy>=2.4.0
 matplotlib>=3.0.0
 seaborn>=0.11.0
+lightgbm>=4.0.0

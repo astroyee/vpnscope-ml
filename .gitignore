@@ -111,3 +111,5 @@ secrets.yaml
 *.key
 *.pem
 
+# Ignore plots and output files
+evaluation_results/
