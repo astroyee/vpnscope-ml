@@ -45,21 +45,29 @@ def analyze_pcap_file(file_obj):
         # 4. Determine Banner display
         vpn_count = np.sum(predictions)
         
-        if suspicion_score >= 50.0: 
-            banner = _render_status(
-                "VPN Traffic Detected", 
-                f"Suspicion Score: {suspicion_score:.1f} / 100", 
-                "#dc2626", 
-                "🚨",
-                detail=f"Model flagged {vpn_count} flows as encrypted tunnels."
-            )
-        else:
+        if suspicion_score < 50.0: 
             banner = _render_status(
                 "Normal Traffic", 
                 f"Suspicion Score: {suspicion_score:.1f} / 100", 
                 "#16a34a", 
                 "✅",
                 detail="Traffic patterns appear consistent with standard web usage."
+            )
+        elif 50.0 <= suspicion_score < 75.0:
+            banner = _render_status(
+                "Suspicion Traffic", 
+                f"Suspicion Score: {suspicion_score:.1f} / 100", 
+                "#f59e0b", 
+                "⚠️",
+                detail="Traffic shows unusual patterns that may indicate VPN usage."
+            )
+        else:
+            banner = _render_status(
+                "VPN Traffic Detected", 
+                f"Suspicion Score: {suspicion_score:.1f} / 100", 
+                "#dc2626", 
+                "🚨",
+                detail=f"Model flagged {vpn_count} flows as encrypted tunnels."
             )
 
         # 5. Prepare display data

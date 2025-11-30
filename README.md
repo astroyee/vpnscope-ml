@@ -107,7 +107,7 @@ The final training pipeline (`run_pipeline`) is engineered for robustness and re
 
 -----
 
-## 5\. Phase IV: Service Deployment & UI
+## 5\. Phase IV: Service
 
 *Source Script: `server/app.py` & `server/core_logic.py`*
 
@@ -127,6 +127,69 @@ The system is deployed as a web application using **Gradio**, chosen for its abi
 4.  **Business Logic Layer:**
       * **Suspicion Score:** We don't just return "VPN" or "Normal." We calculate a weighted score (0-100) based on flow length and protocol (UDP is weighted higher due to VPNs often favoring UDP for speed).
       * **Thresholding:** If Score \> 50, a "Red Alert" banner is displayed.
+
+### 5.2 Core Mechanism: The Suspicion Score Engine
+
+To address the limitations of simple binary classification (VPN vs. Non-VPN), VPNScope Pro incorporates a granular **Weighted Risk Scoring Engine**. This engine evaluates not just *if* a flow is a VPN, but assesses the **confidence**, **duration**, and **protocol** to quantify the actual threat level.
+
+The core of the system is a **Physically Weighted Probability Averaging Algorithm**.
+
+#### **1. The Mathematical Model**
+
+The final Suspicion Score $S$ is calculated using the following weighted formula:
+
+$$S = \left( \frac{\sum_{i=1}^{N} (P'_{i} \times W_{len,i} \times W_{proto,i})}{\sum_{i=1}^{N} (W_{len,i} \times W_{proto,i})} \right) \times 100$$
+
+Where $N$ is the total number of flows extracted from the PCAP file.
+
+#### **2. Parameters & Rationale**
+
+Every parameter in the equation is designed based on network forensics principles:
+
+**A. The Noise Gate ($P'_{i}$)**
+
+* **Calculation:**
+    $$
+    P'_{i} = \begin{cases} 
+    P_{model,i} & \text{if } P_{model,i} \ge T_{optimal} \\
+    0 & \text{if } P_{model,i} < T_{optimal} 
+    \end{cases}
+    $$
+    * $P_{model,i}$: The raw probability (0.0 - 1.0) predicted by the Stacking Ensemble.
+    * $T_{optimal}$: The specific decision threshold optimized for F1-Score during training (loaded from model artifacts).
+* **Why calculate it this way?**
+    This is an **Optional Configuration** designed to eliminate "background white noise." In network traffic, many benign flows (short connections, handshakes) may hover around probabilities of 0.4–0.6. Without this gate, these low-confidence predictions would accumulate and dilute the overall score. By applying this filter, we force the system to **only count risks the model is confident about**, thereby sharpening the alert precision.
+
+**B. Logarithmic Length Weight ($W_{len,i}$)**
+
+* **Calculation:**
+    $$W_{len,i} = \ln(\text{PacketCount}_i + 1)$$
+    *(Implementation: `np.log1p`)*
+* **Why calculate it this way?**
+    Network flows exhibit extreme variance in size (from 5 packets to 100,000+).
+    * **The flaw of linear weighting:** If we used linear packet counts, a single large file download (100k packets) would statistically drown out all other flows, dominating the final score.
+    * **The power of Logarithms:** This applies **diminishing marginal utility**. We assert that a 1,000-packet flow is significantly more "interesting" than a 10-packet flow, but a 100,000-packet flow is not necessarily 10 times more critical than a 10,000-packet flow. Logarithmic smoothing ensures long connections matter without allowing them to "dictate" the entire report.
+
+**C. Protocol Bias Coefficient ($W_{proto,i}$)**
+
+* **Calculation:**
+    $$
+    W_{proto,i} = \begin{cases} 
+    1.2 & \text{if Protocol is UDP} \\
+    1.0 & \text{if Protocol is TCP/Other} 
+    \end{cases}
+    $$
+* **Why calculate it this way?**
+    This is a heuristic adjustment based on **Domain Knowledge**.
+    * High-performance VPN protocols (WireGuard, OpenVPN UDP Mode, IPsec) overwhelmingly favor **UDP** encapsulation to avoid the "TCP Meltdown" phenomenon.
+    * Conversely, standard Web traffic (HTTP/HTTPS) is predominantly TCP.
+    * Therefore, a flow identified as "VPN" that is also **UDP** is statistically more likely to be a genuine tunnel than a TCP flow. We apply a 20% weight penalty to reflect this increased suspicion.
+
+#### **3. Score Interpretation**
+
+* **0 - 50 (Low Risk):** Mostly standard traffic, or only contains short, low-confidence snippets.
+* **50 - 75 (Medium Risk):** VPN activity detected, but flows may be short, ambiguous, or infrequent (potential keep-alive packets or false positives).
+* **75 - 100 (High Risk):** **Red Alert**. The system has detected high-confidence, long-duration encrypted tunnels matching known VPN protocol behaviors.
 
 -----
 
