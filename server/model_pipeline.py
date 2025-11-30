@@ -416,5 +416,85 @@ def run_pipeline():
     joblib.dump(model_artifacts, f'{output_dir}/vpn_model_artifacts.pkl')
     print(f"\n[INFO] Model artifacts saved to {output_dir}/vpn_model_artifacts.pkl")
 
+# ==========================================
+# 6. Inference Service (New Added)
+# ==========================================
+
+class VPNInferenceService:
+    """
+    Encapsulates model inference logic for the application.
+    Handles loading the model, aligning features, and making predictions.
+    """
+    def __init__(self, artifacts_path='server/vpn_model_artifacts.pkl'):
+        self.artifacts_path = artifacts_path
+        self.pipeline = None
+        self.threshold = 0.5
+        self.feature_names_in = None
+        self.is_loaded = False
+        self._load_artifacts()
+
+    def _load_artifacts(self):
+        try:
+            if os.path.exists(self.artifacts_path):
+                print(f"[INFO] Loading artifacts from {self.artifacts_path}...")
+                # Note: joblib loading requires VPNFeaturePreprocessor and CorrelationSelector
+                # to be defined in the current namespace (which they are in this file).
+                artifacts = joblib.load(self.artifacts_path)
+                
+                self.pipeline = artifacts['pipeline']
+                self.threshold = artifacts.get('threshold', 0.5)
+                
+                # Retrieve the feature list from training
+                if 'feature_names' in artifacts:
+                    self.feature_names_in = artifacts['feature_names']
+                elif hasattr(self.pipeline, 'feature_names_in_'):
+                    self.feature_names_in = self.pipeline.feature_names_in_
+                
+                self.is_loaded = True
+                print(f"[INFO] Model loaded. Threshold: {self.threshold:.4f}")
+            else:
+                print(f"[ERROR] Artifact file not found: {self.artifacts_path}")
+        except Exception as e:
+            print(f"[ERROR] Model load failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def predict(self, X_inference):
+        """
+        Executes prediction on the input dataframe.
+        :param X_inference: Raw input DataFrame (usually from core_logic.extract_features)
+        :return: Tuple (vpn_probs, predictions, error_msg)
+        """
+        if not self.is_loaded or self.pipeline is None:
+            return None, None, "Model not loaded."
+
+        try:
+            # 1. Clean column names (consistent with training)
+            clean_names = [re.sub(r'[<>\\[\\]]', '_', name) for name in X_inference.columns]
+            X_inference.columns = clean_names
+
+            # 2. Feature Alignment
+            # Ensure the DataFrame column order and quantity match training exactly
+            if self.feature_names_in is not None:
+                # Fill missing columns with 0
+                missing_cols = set(self.feature_names_in) - set(X_inference.columns)
+                for c in missing_cols:
+                    X_inference[c] = 0
+                
+                # Remove extra columns and reorder according to training order
+                X_inference = X_inference[self.feature_names_in]
+
+            # 3. Predict Probabilities
+            probs_all = self.pipeline.predict_proba(X_inference)
+            vpn_probs = probs_all[:, 1]
+
+            # 4. Apply Threshold
+            predictions = (vpn_probs >= self.threshold).astype(int)
+
+            return vpn_probs, predictions, None
+
+        except Exception as e:
+            return None, None, str(e)
+
 if __name__ == "__main__":
     run_pipeline()

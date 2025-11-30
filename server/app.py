@@ -1,98 +1,18 @@
 import gradio as gr
 import pandas as pd
 import numpy as np
-import joblib
 import os
-import re
-from sklearn.base import BaseEstimator, TransformerMixin
+from model_pipeline import (
+    VPNInferenceService, 
+    VPNFeaturePreprocessor, 
+    CorrelationSelector
+)
+from core_logic import extract_features, calculate_suspicion_score
 
-# Assume core logic file core_logic.py exists and provides extraction functions
-# If core_logic.py also contains relevant class definitions, ensure there are no conflicts
-try:
-    from core_logic import extract_features, calculate_suspicion_score
-except ImportError:
-    # Simple mock to prevent UI check failure due to missing core_logic
-    def extract_features(f): return pd.DataFrame(), pd.DataFrame()
-    def calculate_suspicion_score(m, p): return 0
-
-# --- 1. Must redefine classes here ---
-# Joblib needs to find these class definitions in the current namespace when loading the model
-# Must match the class definitions in the training code exactly
-
-class VPNFeaturePreprocessor(BaseEstimator, TransformerMixin):
-    def fit(self, X, y=None):
-        return self
-    def transform(self, X):
-        X_copy = X.copy()
-        if isinstance(X_copy, pd.DataFrame):
-            num_cols = X_copy.select_dtypes(include=[np.number]).columns
-            # Compatible with applymap/map in new and old pandas versions
-            func = lambda x: 0 if x < 0 else x
-            try:
-                X_copy[num_cols] = X_copy[num_cols].map(func)
-            except:
-                X_copy[num_cols] = X_copy[num_cols].applymap(func)
-            X_copy[num_cols] = np.log1p(X_copy[num_cols])
-        else:
-            X_copy[X_copy < 0] = 0
-            X_copy = np.log1p(X_copy)
-        return X_copy
-
-class FeatureSelector(BaseEstimator, TransformerMixin):
-    def __init__(self, threshold=0.95):
-        self.threshold = threshold
-        self.to_drop = []
-
-    def fit(self, X, y=None):
-        if isinstance(X, pd.DataFrame):
-            df = X
-        else:
-            df = pd.DataFrame(X)
-        corr_matrix = df.corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        self.to_drop = [column for column in upper.columns if any(upper[column] > self.threshold)]
-        return self
-
-    def transform(self, X):
-        if isinstance(X, pd.DataFrame):
-            return X.drop(columns=self.to_drop, errors='ignore')
-        return X
-
-# --- 2. Global Variables and Configuration ---
+# --- 1. Model Initialization ---
+# Classes like VPNFeaturePreprocessor are now handled internally by VPNInferenceService
 ARTIFACTS_PATH = 'server/vpn_model_artifacts.pkl'
-
-# Global variables
-pipeline = None
-optimal_threshold = 0.5
-model_features_in = None
-
-def load_artifacts():
-    global pipeline, optimal_threshold, model_features_in
-    try:
-        if os.path.exists(ARTIFACTS_PATH):
-            print(f"Loading artifacts from {ARTIFACTS_PATH}...")
-            artifacts = joblib.load(ARTIFACTS_PATH)
-            
-            # Unpack from dictionary
-            pipeline = artifacts['pipeline']
-            optimal_threshold = artifacts.get('threshold', 0.5)
-            
-            # Try to get the input feature list from training (Sklearn Pipeline usually has this attribute)
-            # If not, rely on feature_names potentially saved in artifacts
-            if hasattr(pipeline, 'feature_names_in_'):
-                model_features_in = pipeline.feature_names_in_
-            
-            print(f"Model loaded successfully. Optimal Threshold: {optimal_threshold:.4f}")
-            return True
-        else:
-            print(f"Artifact file not found: {ARTIFACTS_PATH}")
-            return False
-    except Exception as e:
-        print(f"Model load failed: {e}")
-        return False
-
-# Initial load
-load_artifacts()
+inference_service = VPNInferenceService(ARTIFACTS_PATH)
 
 def analyze_pcap_file(file_obj):
     empty_outputs = (
@@ -106,52 +26,32 @@ def analyze_pcap_file(file_obj):
     try:
         print(f"Analyzing: {file_obj.name}")
         
-        # 1. Extract features
+        # 1. Extract features (delegated to core_logic)
         X_inference, df_meta = extract_features(file_obj.name)
         
         if X_inference.empty:
             return (_render_status("Error", "No valid flows found.", "#ef4444"), *empty_outputs[1:])
             
-        if not pipeline:
-            return (_render_status("Error", "Model not loaded.", "#ef4444"), *empty_outputs[1:])
+        # 2. Model Inference (delegated to model_pipeline service)
+        # Handles feature alignment, probability prediction, and thresholding
+        vpn_probs, predictions, error = inference_service.predict(X_inference)
 
-        # 2. Clean column names (consistent with training)
-        clean_names = [re.sub(r'[<>\\[\\]]', '_', name) for name in X_inference.columns]
-        X_inference.columns = clean_names
+        if error:
+            return (_render_status("Error", error, "#ef4444"), *empty_outputs[1:])
 
-        # 3. Feature Alignment - Very Important!
-        # Ensure the DataFrame column order and quantity input to the Pipeline match training exactly
-        if model_features_in is not None:
-            # Fill missing columns with 0
-            missing_cols = set(model_features_in) - set(X_inference.columns)
-            for c in missing_cols:
-                X_inference[c] = 0
-            
-            # Remove extra columns and reorder according to training order
-            X_inference = X_inference[model_features_in]
-
-        # 4. Predict probabilities
-        # Pipeline automatically executes: Preprocessor -> Selector -> Scaler -> Stacking -> Meta Model
-        probs_all = pipeline.predict_proba(X_inference)
-        vpn_probs = probs_all[:, 1]
-        
-        # 5. Classify using the optimal threshold (instead of default predict)
-        predictions = (vpn_probs >= optimal_threshold).astype(int)
-
-        # 6. Calculate Suspicion Score
-        # Can still use the original logic here, or base it directly on the mean of vpn_probs
+        # 3. Calculate Suspicion Score (Business Logic)
         suspicion_score = calculate_suspicion_score(df_meta, vpn_probs)
         
-        # Determine Banner display
-        # Logic: If a certain number of flows are determined to be VPN and the score is high, alert
-        # Can keep this business-level threshold, or combine with prediction counts
+        # 4. Determine Banner display
+        vpn_count = np.sum(predictions)
+        
         if suspicion_score >= 50.0: 
             banner = _render_status(
                 "VPN Traffic Detected", 
                 f"Suspicion Score: {suspicion_score:.1f} / 100", 
                 "#dc2626", 
                 "🚨",
-                detail=f"Model flagged {np.sum(predictions)} flows as encrypted tunnels."
+                detail=f"Model flagged {vpn_count} flows as encrypted tunnels."
             )
         else:
             banner = _render_status(
@@ -162,12 +62,11 @@ def analyze_pcap_file(file_obj):
                 detail="Traffic patterns appear consistent with standard web usage."
             )
 
-        # 7. Prepare display data
+        # 5. Prepare display data
         results_df = df_meta.copy()
         results_df['Type'] = ["🔴VPN" if p == 1 else "✅Normal" for p in predictions]
         results_df['VPN Prob'] = (vpn_probs).round(4)
         
-        vpn_count = np.sum(predictions)
         normal_count = len(predictions) - vpn_count
         df_type_counts = pd.DataFrame({
             "Traffic Type": ["VPN / Encrypted", "Normal / Clear"],
@@ -206,7 +105,7 @@ def _render_status(title, desc, color, icon="", detail=""):
     </div>
     """
 
-# --- Gradio UI Definition (Keep as is, just fine-tune some descriptions) ---
+# --- Gradio UI Definition ---
 with gr.Blocks(title="VPNScope Pro") as demo:
     
     gr.Markdown(
