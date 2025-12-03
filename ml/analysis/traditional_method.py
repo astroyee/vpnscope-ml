@@ -1,134 +1,75 @@
-import os
 import pandas as pd
-import numpy as np
 from scipy.io import arff
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
-# Dataset Path
-DATA_FILE_PATH = 'ml/data/processed/TimeBasedFeatures-Dataset-15s-VPN.arff'
+# -------------------------------------
+# 1. Load ARFF file
+# -------------------------------------
+file_path = "ml/data/processed/TimeBasedFeatures-Dataset-15s-VPN.arff"
 
-def load_data(file_path):
-    """
-    Load and preprocess the ARFF data.
-    """
-    if not os.path.exists(file_path):
-        print(f"[Error] File not found: {file_path}")
-        return None
+data, meta = arff.loadarff(file_path)
+df = pd.DataFrame(data)
 
-    print(f"Loading data from: {file_path} ...")
-    try:
-        data, meta = arff.loadarff(file_path)
-        df = pd.DataFrame(data)
-        
-        # Decode byte strings to normal strings
-        str_df = df.select_dtypes([object])
-        if not str_df.empty:
-            str_df = str_df.stack().str.decode('utf-8').unstack()
-            for col in str_df:
-                df[col] = str_df[col]
-            
-        return df
-    except Exception as e:
-        print(f"[Error] Loading failed: {e}")
-        return None
+# Strings in ARFF become bytes after loading, need to decode
+for col in df.columns:
+    if df[col].dtype == object:
+        df[col] = df[col].apply(lambda x: x.decode('utf-8') if isinstance(x, bytes) else x)
 
-def heuristic_vpn_detection(df_in):
-    """
-    Apply heuristic rules (Large Packets & Long Duration) to detect VPN.
-    """
-    print("Applying heuristic rules...")
-    
-    # Create a copy to avoid modifying the original dataframe structure for label extraction later
-    df = df_in.copy()
-    
-    # --- 1. Feature Engineering ---
-    # Calculate Average Packet Size = Bytes / Packets
-    # Add epsilon to avoid division by zero
-    df['avg_pkt_size'] = df['flowBytesPerSecond'] / (df['flowPktsPerSecond'].replace(0, 1))
+# -------------------------------------
+# 2. Split features and label
+# -------------------------------------
+X = df.drop("class1", axis=1)
+y = df["class1"]
 
-    # --- 2. Thresholds ---
-    # Duration > 5 seconds (unit is microseconds in dataset)
-    DURATION_THRESHOLD = 1e8 
-    # Avg Packet Size > 100 Bytes (heuristic for VPN encapsulation overhead + payload)
-    PKT_SIZE_THRESHOLD = 10
+# Encode labels (Non-VPN / VPN -> numeric)
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
 
-    # --- 3. Rules Logic ---
-    # Rule: IF (Long Duration) OR (Large Packet Size) -> VPN
-    
-    predictions = []
-    
-    for index, row in df.iterrows():
-        is_long_duration = row['duration'] > DURATION_THRESHOLD
-        is_large_packet = row['avg_pkt_size'] > PKT_SIZE_THRESHOLD
-        
-        if is_long_duration or is_large_packet:
-            predictions.append(1) # Predict VPN
-        else:
-            predictions.append(0) # Predict Non-VPN
-            
-    return predictions
+# -------------------------------------
+# 3. Train-test split
+# -------------------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+)
 
-def evaluate_results(df, predictions):
-    """
-    Compare predictions with ground truth.
-    """
-    # Identify Target Column
-    # IMPORTANT: Since we used df.copy() in detection, the original df passed here 
-    # still has the label as the last column.
-    target_col = df.columns[-1]
-    
-    print(f"Ground Truth Column Identified: '{target_col}'")
-    
-    # Map labels to 0/1
-    def map_label(label):
-        label_str = str(label).lower()
-        if 'non-vpn' in label_str: return 0
-        if 'vpn' in label_str or 'tor' in label_str: return 1
-        return 0
+# -------------------------------------
+# 4. Decision Tree Model
+# -------------------------------------
+dt = DecisionTreeClassifier(
+    criterion="gini",
+    max_depth=None,        # adjustable
+    min_samples_split=2,
+    min_samples_leaf=1,
+    random_state=42
+)
 
-    y_true = df[target_col].apply(map_label)
-    y_pred = predictions
+dt.fit(X_train, y_train)
 
-    # Verify we have mixed labels
-    unique_true = np.unique(y_true)
-    print(f"Labels found in dataset: {unique_true} (0=Non-VPN, 1=VPN)")
-    if len(unique_true) < 2:
-        print("[Warning] Dataset seems to contain only one class based on mapping logic!")
+# -------------------------------------
+# 5. Prediction and Evaluation
+# -------------------------------------
+y_pred = dt.predict(X_test)
 
-    print("\n" + "="*60)
-    print("Traditional Heuristic Evaluation Report")
-    print("="*60)
-    print(f"Rule: Duration > 5s AND Avg Pkt Size > 100 Bytes")
-    print("-" * 60)
-    
-    # Metrics
-    acc = accuracy_score(y_true, y_pred)
-    print(f"Accuracy: {acc:.4f}")
-    
-    print("\nClassification Report:")
-    print(classification_report(y_true, y_pred, target_names=['Non-VPN', 'VPN'], digits=4))
-    
-    # Confusion Matrix
-    cm = confusion_matrix(y_true, y_pred)
-    print("\nConfusion Matrix:")
-    print(f"TN (Non-VPN correct): {cm[0][0]}")
-    print(f"FP (Non-VPN -> VPN):  {cm[0][1]}")
-    print(f"FN (VPN -> Non-VPN):  {cm[1][0]}")
-    print(f"TP (VPN correct):     {cm[1][1]}")
+print("\nAccuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=le.classes_))
 
-def main():
-    # 1. Load
-    df = load_data(DATA_FILE_PATH)
-    if df is None:
-        return
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
 
-    # 2. Detect
-    # Pass a copy or handle inside to prevent column shift issues
-    preds = heuristic_vpn_detection(df)
+# -------------------------------------
+# 6. Decision Tree Rules
+# -------------------------------------
+print("\nDecision Tree Rules (partial):")
+rules = export_text(dt, feature_names=list(X.columns))
+# print(rules)
 
-    # 3. Evaluate
-    # Pass original df to ensure we grab the correct label column
-    evaluate_results(df, preds)
-
-if __name__ == "__main__":
-    main()
+# -------------------------------------
+# 7. Feature Importance Analysis
+# -------------------------------------
+importances = pd.Series(dt.feature_importances_, index=X.columns)
+print("\nFeature Importances (sorted):")
+print(importances.sort_values(ascending=False))
