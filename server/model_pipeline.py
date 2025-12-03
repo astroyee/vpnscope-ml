@@ -480,7 +480,7 @@ def run_pipeline():
     print(f"\n[INFO] Model artifacts saved to {output_dir}/vpn_model_artifacts.pkl")
 
 # ==========================================
-# 6. Inference Service (New Added)
+# 6. Inference Service
 # ==========================================
 
 class VPNInferenceService:

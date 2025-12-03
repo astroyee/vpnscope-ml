@@ -1,0 +1,82 @@
+Starting comprehensive data analysis report generation...
+Report will be saved to: evaluation_results\analysis_report.txt
+Plots will be saved to: evaluation_results/
+Loading data from: ml/data/processed\TimeBasedFeatures-Dataset-15s-VPN.arff ...
+
+============================================================
+PART 1: Data Distribution Analysis
+============================================================
+--- 1. Dataset Shape ---
+Number of Rows (Samples): 18758
+Number of Columns (Features): 24
+
+--- 2. Class Distribution (Target: class1) ---
+         Count  Percentage (%)
+class1                        
+VPN       9793       52.207058
+Non-VPN   8965       47.792942
+
+--- 3. Special Value Check (NaN, Inf, 0, Negative) ---
+Total NaN values: 0
+Total Inf values: 0
+
+Columns containing zeros (Top 5):
+std_active     14935
+std_idle       14935
+mean_active    11355
+mean_idle      11355
+mean_biat       5034
+dtype: int64
+
+[!] Warning: Negative values detected (Top 5):
+min_idle      11355
+max_idle      11355
+max_active    11355
+min_active    11355
+min_biat       3637
+dtype: int64
+
+--- 4. Feature Skewness ---
+Number of highly skewed features (|Skew| > 1): 23 / 23
+Top 5 features with highest skewness:
+flowBytesPerSecond    57.518702
+std_idle              34.377980
+std_active            33.346030
+min_biat              32.902625
+flowPktsPerSecond     27.779703
+dtype: float64
+
+--- 5. Statistical Summary (Partial) ---
+          duration    total_fiat    total_biat      min_fiat
+mean  9.791705e+06  6.086783e+05  6.267802e+05  3.314204e+06
+std   1.438458e+07  2.243195e+06  2.326442e+06  1.062115e+07
+min   0.000000e+00 -1.000000e+00 -1.000000e+00 -1.000000e+00
+max   6.014050e+08  3.768079e+07  4.300238e+07  3.035957e+08
+... (Total 23 columns)
+
+============================================================
+PART 2: PCA Analysis (Principal Component Analysis)
+============================================================
+PCA Scree Plot saved to: evaluation_results\pca_scree_plot.png
+Original number of features: 23
+Components needed for 95% variance: 7
+Components needed for 99% variance: 11
+
+============================================================
+PART 3: Feature Correlation & Redundancy Analysis
+============================================================
+
+[1] Checking for constant columns (Variance = 0)...
+ -> No constant columns found.
+
+[2] Checking for highly correlated columns (Correlation > 0.95)...
+Correlation Heatmap saved to: evaluation_results\correlation_heatmap.png
+ -> Found 7 highly redundant columns (recommended to remove):
+    ['min_active', 'mean_active', 'max_active', 'min_idle', 'mean_idle', 'max_idle', 'std_idle'] ...
+--------------------------------------------------
+Total features recommended to drop: 7
+Remaining useful features: 16
+
+============================================================
+All analysis tasks completed successfully.
+============================================================
